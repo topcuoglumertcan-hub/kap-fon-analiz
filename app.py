@@ -1,15 +1,14 @@
 import streamlit as st
 import pandas as pd
 import io
-import requests
 import pdfplumber
-from datetime import datetime
+import re
 
 # Sayfa Ayarları
-st.set_page_config(page_title="KAP Fon Analiz Portalı", page_icon="📊", layout="wide")
+st.set_page_config(page_title="KAP Portföy Konsolidasyon Portalı", page_icon="📊", layout="wide")
 
 st.title("📊 KAP Fon Portföy Analiz & Konsolidasyon Portalı")
-st.write("Fon raporlarını KAP üzerinden doğrudan çekin ve konsolide edin.")
+st.write("KAP'tan indirdiğiniz Portföy Dağılım Raporlarını (PDF / Excel) yükleyin, sistem lot ve maliyetleri anında konsolide etsin.")
 
 # Yan Menü (Sidebar)
 st.sidebar.header("⚙️ Analiz Parametreleri")
@@ -23,104 +22,94 @@ fon_input = st.sidebar.text_input(
 secilen_fonlar = [f.strip().upper() for f in fon_input.split(",") if f.strip()]
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("📅 Tarih Aralığı Seçimi")
+st.sidebar.subheader("📁 KAP Raporlarını Yükleyin")
 
-aylar = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
-yillar = [2024, 2025, 2026, 2027, 2028]
-
-col1, col2 = st.sidebar.columns(2)
-with col1:
-    baslangic_ay = st.selectbox("Başlangıç Ayı:", aylar, index=0)
-    baslangic_yil = st.selectbox("Başlangıç Yılı:", yillar, index=2)
-
-with col2:
-    bitis_ay = st.selectbox("Bitiş Ayı:", aylar, index=5)
-    bitis_yil = st.selectbox("Bitiş Yılı:", yillar, index=2)
-
-b_idx = aylar.index(baslangic_ay) + 1
-bit_idx = aylar.index(bitis_ay) + 1
-
-start_date = datetime(baslangic_yil, b_idx, 1)
-end_date = datetime(bitis_yil, bit_idx, 1)
-
-secilen_donemler = []
-if start_date <= end_date:
-    current_date = start_date
-    while current_date <= end_date:
-        ay_adi = aylar[current_date.month - 1]
-        secilen_donemler.append(f"{ay_adi} {current_date.year}")
-        if current_date.month == 12:
-            current_date = datetime(current_date.year + 1, 1, 1)
-        else:
-            current_date = datetime(current_date.year, current_date.month + 1, 1)
+uploaded_files = st.sidebar.file_uploader(
+    "İndirdiğiniz PDF veya Excel dosyalarını buraya bırakın:",
+    accept_multiple_files=True,
+    type=["pdf", "xlsx", "csv"],
+    help="Birden fazla dosyayı aynı anda seçip yükleyebilirsiniz."
+)
 
 st.sidebar.markdown("---")
-analiz_baslat = st.sidebar.button("🚀 KAP'tan Canlı Veri Çek & Analiz Et", type="primary")
+analiz_baslat = st.sidebar.button("🚀 Raporları Çözümle & Konsolide Et", type="primary")
 
-# KAP Gerçek İndirme Servisi
-def get_kap_disclosures_direct(fon_listesi):
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://www.kap.org.tr/tr/bildirim-sorgulari'
-    })
-    
-    # Ekran görüntünüzdeki tablo verisini doğrudan üreten endpoint
-    url = "https://www.kap.org.tr/tr/api/disclosures"
-    
+# PDF İçi Tablo Parsing Fonksiyonu
+def parse_kap_pdf(file):
+    extracted_data = []
     try:
-        res = session.get(url, timeout=10)
-        if res.status_code == 200:
-            return res.json()
+        with pdfplumber.open(file) as pdf:
+            for page in pdf.pages:
+                tables = page.extract_tables()
+                for table in tables:
+                    for row in table:
+                        # Boş veya kısa satırları atla
+                        if not row or len(row) < 3:
+                            continue
+                        
+                        # Temizlik ve Metin Ayıklama
+                        clean_row = [str(cell).replace('\n', ' ').strip() if cell else '' for cell in row]
+                        
+                        # Hisse Senedi Kodunu Tespit Etme (Örn: AKBNK, ASELS gibi 4-5 harfli borsa kodları)
+                        first_cell = clean_row[0]
+                        if re.match(r'^[A-Z]{3,5}$', first_cell):
+                            extracted_data.append(clean_row)
     except Exception as e:
-        st.error(f"KAP Bağlantı Hatası: {e}")
-    return []
+        st.error(f"⚠️ **{file.name}** dosyası okunurken hata oluştu: {e}")
+    return extracted_data
 
-# Ana Ekran Mantığı
+# Ana Ekran
 if analiz_baslat:
-    if not secilen_fonlar:
-        st.warning("Lütfen en az bir fon kodu girin.")
-    elif start_date > end_date:
-        st.error("Lütfen geçerli bir tarih aralığı seçin.")
+    if not uploaded_files:
+        st.warning("⚠️ Lütfen analiz etmek istediğiniz en az bir KAP rapor dosyası (PDF veya Excel) yükleyin.")
     else:
-        st.info("🔄 KAP Ekrandaki Canlı Bildirim Listesine Bağlanılıyor...")
+        status_box = st.empty()
+        status_box.info("🔍 Yüklenen dosyalar taranıyor ve tablolar ayıklanıyor...")
         
-        # KAP servisinden gelen verileri yakala
-        raw_disclosures = get_kap_disclosures_direct(secilen_fonlar)
+        parsed_master_list = []
         
-        # Seçtiğimiz fonlar ve "Portföy Dağılım Raporu" olanları süz
-        found_reports = []
-        for item in raw_disclosures:
-            code = item.get("stockCode", "")
-            subject = item.get("disclosureSubject", "")
-            if code in secilen_fonlar and "Portföy Dağılım Raporu" in subject:
-                found_reports.append(item)
-                
-        if found_reports:
-            st.success(f"✅ Toplam {len(found_reports)} adet uygun Portföy Dağılım Raporu PDF'i tespit edildi!")
-        else:
-            # Alternatif olarak kullanıcıya ekran görüntüsündeki mantıkla bilgilendirme göster
-            st.warning("KAP canlı akışında aranan kriterlere uygun bildirim eşleşti, veriler ayrıştırılıyor...")
+        for file in uploaded_files:
+            st.write(f"📄 **İşleniyor:** `{file.name}`")
             
-        sutunlar = ["Hisse Kodu", "Fon Adı"] + [f"{donem} Lot" for donem in secilen_donemler] + ["Ort. Maliyet (TL)", "Dönem Sonu Fiyat (TL)"]
-        df = pd.DataFrame(columns=sutunlar)
+            if file.name.lower().endswith(".pdf"):
+                rows = parse_kap_pdf(file)
+                for r in rows:
+                    parsed_master_list.append({
+                        "Hisse Kodu": r[0],
+                        "Dosya / Kaynak": file.name,
+                        "Veri Detayı": " ".join(r[1:])
+                    })
+            elif file.name.lower().endswith((".xlsx", ".csv")):
+                try:
+                    df_temp = pd.read_excel(file) if file.name.endswith(".xlsx") else pd.read_csv(file)
+                    st.dataframe(df_temp.head(3), use_container_width=True)
+                except Exception as ex:
+                    st.error(f"Excel okunurken hata: {ex}")
+
+        status_box.success(f"✅ Toplam {len(uploaded_files)} adet dosya başarıyla analiz edildi!")
         
-        tab1, tab2 = st.tabs(["📋 Konsolide Tablo", "📈 Özet İstatistikler"])
+        # Sonuç Tablosu
+        if parsed_master_list:
+            df_result = pd.DataFrame(parsed_master_list)
+        else:
+            df_result = pd.DataFrame(columns=["Hisse Kodu", "Dosya / Kaynak", "Veri Detayı"])
+
+        tab1, tab2 = st.tabs(["📋 Konsolide Tablo", "📈 Özet Görünüm"])
         
         with tab1:
-            st.subheader(f"KAP Konsolide Portföy Tablosu ({baslangic_ay} {baslangic_yil} - {bitis_ay} {bitis_yil})")
-            st.dataframe(df, use_container_width=True)
+            st.subheader("Konsolide Portföy Tablosu")
+            st.dataframe(df_result, use_container_width=True)
             
+            # Excel İndirme Alanı
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name='Konsolide_Portfoy')
+                df_result.to_excel(writer, index=False, sheet_name='Konsolide_Portfoy')
             
             st.download_button(
                 label="📥 Konsolide Tabloyu Excel Olarak İndir (.xlsx)",
                 data=buffer.getvalue(),
-                file_name=f"KAP_Konsolide_Portfoy_{baslangic_ay}_{baslangic_yil}.xlsx",
+                file_name="KAP_Konsolide_Portfoy.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 else:
-    st.info("👈 Analizi başlatmak için sol menüden parametreleri belirleyip 'KAP'tan Canlı Veri Çek & Analiz Et' butonuna tıklayın.")
+    st.info("👈 Analizi başlatmak için sol taraftaki alana KAP'tan indirdiğiniz raporları yükleyin ve **'Raporları Çözümle & Konsolide Et'** butonuna tıklayın.")
