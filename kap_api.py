@@ -1,29 +1,31 @@
-import requests
+from playwright.sync_api import sync_playwright
 
 
-class KAPClient:
+def test_kap():
 
-    def __init__(self):
-        self.session = requests.Session()
+    with sync_playwright() as p:
 
-        self.session.headers.update({
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://www.kap.org.tr/tr/bildirim-sorgulari"
-        })
+        browser = p.chromium.launch(
+            headless=False
+        )
 
-    def test_connection(self):
+        page = browser.new_page()
 
-        url = "https://www.kap.org.tr/tr/api/disclosures"
+        page.goto(
+            "https://www.kap.org.tr/tr/bildirim-sorgulari",
+            wait_until="networkidle",
+            timeout=60000
+        )
 
-        response = self.session.get(url, timeout=20)
+        print("Sayfa Başlığı:")
+        print(page.title())
 
-        print("Status Code :", response.status_code)
+        page.screenshot(path="kap_home.png")
 
-        print(response.text[:500])
+        input("Tarayıcı açıldı. Devam etmek için Enter'a bas...")
+
+        browser.close()
 
 
 if __name__ == "__main__":
-
-    client = KAPClient()
-
-    client.test_connection()
+    test_kap()
