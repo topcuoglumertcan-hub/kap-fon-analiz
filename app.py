@@ -32,17 +32,9 @@ if uploaded_files:
         if not matrix_df.empty:
             st.subheader("📋 Birleştirilmiş Portföy & Hisse Dağılım Tablosu")
             
-            # Görsel 5'teki gibi biçimlendirilmiş gösterim
-            st.dataframe(
-                matrix_df.style.format({
-                    "Ort. Maliyet (TL)": "{:.2f}",
-                    "Rapor Tarihindeki Hisse Fiyatı": "{:.2f}",
-                    "Grup Ağ. (%)": "%{:.2f}"
-                }),
-                use_container_width=True
-            )
+            st.dataframe(matrix_df, use_container_width=True)
             
-            # Excel İndirme
+            # Excel İndirme Butonu
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 matrix_df.to_excel(writer, index=False, sheet_name='Fon_Analiz')
@@ -54,4 +46,4 @@ if uploaded_files:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.error("PDF içeriği okundu ancak Hisse Tablosu verisi ayrıştırılamadı. Lütfen PDF dosyalarının şifresiz ve standart KAP formatında olduğundan emin olun.")
+            st.error("PDF içeriği okundu ancak hisse verileri ayrıştırılamadı. Kod güncellendi, lütfen buton ile tekrar deneyin.")
