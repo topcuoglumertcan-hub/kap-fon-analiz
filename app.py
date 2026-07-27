@@ -32,10 +32,10 @@ if uploaded_files:
         if not final_df.empty:
             st.subheader("📋 Birleştirilmiş Portföy & Hisse Dağılım Tablosu")
             
-            # Tek ve Derli Toplu Ana Tablo
+            # Doğrudan Tek Parça Sade Tablo
             st.dataframe(final_df, use_container_width=True)
             
-            # Excel İndirme Butonu
+            # Excel İndirme
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 final_df.to_excel(writer, index=False, sheet_name='Fon_Analiz')
@@ -47,4 +47,4 @@ if uploaded_files:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.error("PDF dosyalarından veri ayrıştırılamadı. Dosyaları kontrol ediniz.")
+            st.error("PDF dosyalarından veri ayrıştırılamadı. Lütfen kontrol ediniz.")
