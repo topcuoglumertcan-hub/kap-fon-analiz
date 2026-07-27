@@ -1,5 +1,5 @@
 import pandas as pd
-from kap_api import get_bist_live_prices  # Canlı fiyat modülümüz
+from kap_api import get_bist_live_prices
 
 MONTH_ORDER = [
     "Ocak Lot", "Şubat Lot", "Mart Lot", "Nisan Lot", 
@@ -27,7 +27,7 @@ def build_portfolio_matrix(all_parsed_data):
         
         for h in item.get("hisseler", []):
             records.append({
-                "Hisse Kodu": h["hisse"],
+                "Hisse Kodu": str(h["hisse"]).strip().upper(),
                 "Fon Kodu": fon_kodu,
                 "Portföy Şirketi": portfoy_sirketi,
                 "Dönem": col_name,
@@ -67,7 +67,7 @@ def build_portfolio_matrix(all_parsed_data):
         "Ort. Maliyet (TL)": "last"
     }).reset_index()
     
-    # Tabloları Birleştir
+    # Birleştir
     merged_df = pd.merge(pivot_lot.reset_index(), latest_metrics, on=["Hisse Kodu", "Fon Kodu", "Portföy Şirketi"], how="left")
     
     # 4. Canlı Fiyatı Ekleme
@@ -79,7 +79,14 @@ def build_portfolio_matrix(all_parsed_data):
         
     merged_df["Grup Ağ. (%)"] = merged_df["Grup Ağ. (%)"].apply(lambda x: f"%{x:.2f}" if pd.notnull(x) and x != 0 else "-")
     merged_df["Ort. Maliyet (TL)"] = merged_df["Ort. Maliyet (TL)"].apply(lambda x: f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if pd.notnull(x) and x > 0 else "-")
-    merged_df["Güncel Hisse Fiyatı (TL)"] = merged_df["Güncel Hisse Fiyatı (TL)"].apply(lambda x: f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if pd.notnull(x) and pd.notna(x) else "-")
+    
+    # Canlı Hisse Fiyatı Formatlama
+    def format_price(val):
+        if pd.notnull(val) and pd.notna(val) and isinstance(val, (int, float)) and val > 0:
+            return f"{val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        return "-"
+        
+    merged_df["Güncel Hisse Fiyatı (TL)"] = merged_df["Güncel Hisse Fiyatı (TL)"].apply(format_price)
     
     final_cols = ["Hisse Kodu", "Fon Kodu", "Portföy Şirketi"] + existing_months + ["Grup Ağ. (%)", "Ort. Maliyet (TL)", "Güncel Hisse Fiyatı (TL)"]
     return merged_df[final_cols]
