@@ -5,7 +5,7 @@ def parse_pdf(pdf_file):
     extracted_data = {
         "fon_kodu": "",
         "fon_adi": "",
-        "portfoy_sirketi": "", # Örn: TERA PORTFÖY, PUSULA PORTFÖY
+        "portfoy_sirketi": "",
         "donem": "",
         "hisseler": []
     }
@@ -17,32 +17,24 @@ def parse_pdf(pdf_file):
             if t:
                 full_text += t + "\n"
 
-        # 1. Portföy Şirket Adını Yakalama (Kurucunun Ünvanı veya Başlıktan)
-        # Örn: B-)Kurucunun Ünvanı : TERA PORTFOY YÖNETİMİ A.Ş.
+        # Kurucunun Ünvanı / Portföy Şirketi
         kurucu_match = re.search(r"Kurucunun\s*Ünvanı\s*:\s*(.+)", full_text, re.IGNORECASE)
         if kurucu_match:
             sirket_raw = kurucu_match.group(1).strip()
-            # "YÖNETİMİ A.Ş." eklerini temizleyip kısa marka adını alma (ör. TERA PORTFÖY)
             sirket_clean = re.sub(r"\s*(YÖNETİMİ|A\.Ş\.|ANONİM\s*ŞİRKETİ).*", "", sirket_raw, flags=re.IGNORECASE).strip()
             extracted_data["portfoy_sirketi"] = sirket_clean if sirket_clean else sirket_raw
         else:
-            # Başlıktan arama (DOH-TERA PORTFÖY ...)
-            title_match = re.search(r"[A-Z0-9]{3,5}\s*-\s*([A-ZÇĞİÖŞÜ\s]+PORTFÖY)", full_text)
-            if title_match:
-                extracted_data["portfoy_sirketi"] = title_match.group(1).strip()
-            else:
-                extracted_data["portfoy_sirketi"] = "PORTFÖY"
+            extracted_data["portfoy_sirketi"] = "PORTFÖY"
 
-        # 2. Fon Kodu ve Dönem Yakalama
+        # Fon Kodu & Dönem
         code_match = re.search(r"\b([A-Z0-9]{3,5})\b\s*-\s*", full_text)
         if code_match:
             extracted_data["fon_kodu"] = code_match.group(1)
             
-        period_match = re.search(r"(Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylul|Ekim|Kasım|Aralık)\s*[-:]?\s*(20\d{2})", full_text, re.IGNORECASE)
+        period_match = re.search(r"(Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık)\s*[-:]?\s*(20\d{2})", full_text, re.IGNORECASE)
         if period_match:
             extracted_data["donem"] = f"{period_match.group(1).capitalize()} {period_match.group(2)}"
 
-        # 3. Hisse Satırlarını Taramak
         lines = full_text.split("\n")
         in_hisse_section = False
         
@@ -87,11 +79,15 @@ def parse_pdf(pdf_file):
 
                 parsed_numbers = [parse_tr_float(n) for n in numbers]
                 
+                # KAP Tablo Dizilimi:
+                # Lot | Maliyet | Hisse Fiyatı | ... | GRUP (%) | TOPLAM (FPD) | TOPLAM (FTD)
                 if len(parsed_numbers) >= 2:
                     lot = parsed_numbers[0]
                     maliyet = parsed_numbers[1]
                     hisse_fiyati = parsed_numbers[2] if len(parsed_numbers) > 2 else maliyet
-                    grup_agirligi = parsed_numbers[-3] if len(parsed_numbers) >= 5 else 0.0
+                    
+                    # Görsel 2'deki GRUP (%) Sütununu Yakalama (Genelde sondan 3. sayısal değerdir)
+                    grup_agirligi = parsed_numbers[-3] if len(parsed_numbers) >= 5 else (parsed_numbers[-1] if len(parsed_numbers) >= 3 else 0.0)
 
                     extracted_data["hisseler"].append({
                         "hisse": hisse_kodu,
