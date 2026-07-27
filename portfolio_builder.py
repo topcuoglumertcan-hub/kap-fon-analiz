@@ -1,32 +1,42 @@
 import pandas as pd
 
+# Kronolojik Sıralama
 MONTH_ORDER = [
     "Ocak Lot", "Şubat Lot", "Mart Lot", "Nisan Lot", 
     "Mayıs Lot", "Haziran Lot", "Temmuz Lot", "Ağustos Lot", 
     "Eylül Lot", "Ekim Lot", "Kasım Lot", "Aralık Lot"
 ]
 
+# Ay İsimlerinin İndeks Karşılığı (Son Dönemi Bulmak İçin)
+MONTH_MAP = {
+    "Ocak": 1, "Şubat": 2, "Mart": 3, "Nisan": 4, 
+    "Mayıs": 5, "Haziran": 6, "Temmuz": 7, "Ağustos": 8, 
+    "Eylül": 9, "Ekim": 10, "Kasım": 11, "Aralık": 12
+}
+
 def build_portfolio_matrix(all_parsed_data):
     records = []
     
     for item in all_parsed_data:
         fon_kodu = item.get("fon_kodu", "FON")
-        portfoy_sirketi = item.get("portfoy_sirketi", "PORTFÖY") # TERA PORTFÖY vb.
+        portfoy_sirketi = item.get("portfoy_sirketi", "PORTFÖY")
         donem = item.get("donem", "")
         
         ay_adi = donem.split()[0] if donem else "Ocak"
+        ay_numarasi = MONTH_MAP.get(ay_adi, 1)
         col_name = f"{ay_adi} Lot"
         
         for h in item.get("hisseler", []):
             records.append({
                 "Hisse Kodu": h["hisse"],
-                "Portföy Şirketi": portfoy_sirketi,
                 "Fon Kodu": fon_kodu,
+                "Portföy Şirketi": portfoy_sirketi,
                 "Dönem": col_name,
+                "Ay No": ay_numarasi,
                 "Lot": h["lot"],
                 "Ort. Maliyet (TL)": h["maliyet"],
                 "Rapor Tarihindeki Hisse Fiyatı": h["hisse_fiyati"],
-                "Grup Ağ. (%)": h["grup_agirligi"]
+                "Grup Ağ. (%)": h["grup_agirligi"] # PDF'teki GRUP (%) değeri
             })
             
     if not records:
@@ -34,61 +44,41 @@ def build_portfolio_matrix(all_parsed_data):
         
     df = pd.DataFrame(records)
     
-    # Pivot Tablo
+    # 1. Lotları Ay Bazlı Pivot Yap (Hisse + Fon + Portföy Kırılımı)
     pivot_lot = df.pivot_table(
-        index=["Hisse Kodu", "Portföy Şirketi", "Fon Kodu"],
+        index=["Hisse Kodu", "Fon Kodu", "Portföy Şirketi"],
         columns="Dönem",
         values="Lot",
         aggfunc="sum"
     ).fillna(0)
     
-    # Sütun Sıralaması
+    # Sütunları Kronolojik Diz (Ocak'tan Aralık'a)
     existing_months = [m for m in MONTH_ORDER if m in pivot_lot.columns]
-    other_cols = [c for c in pivot_lot.columns if c not in MONTH_ORDER]
-    ordered_columns = existing_months + other_cols
-    pivot_lot = pivot_lot[ordered_columns]
+    pivot_lot = pivot_lot[existing_months]
     
-    # Metrikler
-    latest_metrics = df.groupby(["Hisse Kodu", "Portföy Şirketi", "Fon Kodu"]).agg({
-        "Grup Ağ. (%)": "last",
-        "Ort. Maliyet (TL)": "mean",
+    # 2. En Son Döneme Ait Grup Ağırlığı ve Güncel Fiyat/Maliyetleri Alma
+    # Yüklenen en son aya göre sıralayıp en güncel kaydı alıyoruz
+    df_sorted = df.sort_values(by="Ay No")
+    
+    latest_metrics = df_sorted.groupby(["Hisse Kodu", "Fon Kodu", "Portföy Şirketi"]).agg({
+        "Grup Ağ. (%)": "last",                  # Yüklenen en son ayın GRUP % değeri
+        "Ort. Maliyet (TL)": "last",
         "Rapor Tarihindeki Hisse Fiyatı": "last"
     }).reset_index()
     
-    detail_df = pd.merge(pivot_lot.reset_index(), latest_metrics, on=["Hisse Kodu", "Portföy Şirketi", "Fon Kodu"], how="left")
+    # Tabloları Birleştir
+    merged_df = pd.merge(pivot_lot.reset_index(), latest_metrics, on=["Hisse Kodu", "Fon Kodu", "Portföy Şirketi"], how="left")
     
-    # Şablon Tablosu Hazırlığı
-    flat_rows = []
-    for hisse, group in detail_df.groupby("Hisse Kodu"):
-        # 1. Toplam Satırı
-        total_row = {
-            "Hisse Kodu": f"Toplam {hisse}",
-            "Fon Adı": "",
-            "Portföy Şirketi": ""
-        }
-        for m in existing_months:
-            total_row[m] = group[m].sum()
-            
-        total_row["Grup Ağ. (%)"] = "-"
-        total_row["Ort. Maliyet (TL)"] = "-"
-        total_row["Rapor Tarihindeki Hisse Fiyatı"] = "-"
+    # 3. Görsel Biçimlendirme (0 Değerleri Yerine '-' Koyma)
+    for m in existing_months:
+        merged_df[m] = merged_df[m].apply(lambda x: f"{x:,.0f}".replace(",", ".") if x > 0 else "-")
         
-        flat_rows.append(total_row)
-        
-        # 2. Alt Kırılım Satırı (Girintili Portföy Adı)
-        for _, row in group.iterrows():
-            sub_row = {
-                "Hisse Kodu": f"  └ {row['Portföy Şirketi']}", # Gerçek Portföy Şirketi
-                "Fon Adı": row["Fon Kodu"],
-                "Portföy Şirketi": row["Portföy Şirketi"]
-            }
-            for m in existing_months:
-                val = row[m]
-                sub_row[m] = val if val > 0 else "-"
-                
-            sub_row["Grup Ağ. (%)"] = f"%{row['Grup Ağ. (%)']:.2f}" if pd.notnull(row["Grup Ağ. (%)"]) else "-"
-            sub_row["Ort. Maliyet (TL)"] = round(row["Ort. Maliyet (TL)"], 2) if pd.notnull(row["Ort. Maliyet (TL)"]) else "-"
-            sub_row["Rapor Tarihindeki Hisse Fiyatı"] = round(row["Rapor Tarihindeki Hisse Fiyatı"], 2) if pd.notnull(row["Rapor Tarihindeki Hisse Fiyatı"]) else "-"
-            flat_rows.append(sub_row)
-            
-    return pd.DataFrame(flat_rows)
+    merged_df["Grup Ağ. (%)"] = merged_df["Grup Ağ. (%)"].apply(lambda x: f"%{x:.2f}" if pd.notnull(x) and x != 0 else "-")
+    merged_df["Ort. Maliyet (TL)"] = merged_df["Ort. Maliyet (TL)"].apply(lambda x: f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if pd.notnull(x) and x > 0 else "-")
+    merged_df["Rapor Tarihindeki Hisse Fiyatı"] = merged_df["Rapor Tarihindeki Hisse Fiyatı"].apply(lambda x: f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if pd.notnull(x) and x > 0 else "-")
+    
+    # Sütun Sıralamasını İstenen Yapıya Getirme
+    final_cols = ["Hisse Kodu", "Fon Kodu", "Portföy Şirketi"] + existing_months + ["Grup Ağ. (%)", "Ort. Maliyet (TL)", "Rapor Tarihindeki Hisse Fiyatı"]
+    final_df = merged_df[final_cols]
+    
+    return final_df
