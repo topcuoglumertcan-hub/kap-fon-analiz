@@ -1,4 +1,5 @@
 import pandas as pd
+from kap_api import get_bist_live_prices  # Canlı fiyat modülümüz
 
 MONTH_ORDER = [
     "Ocak Lot", "Şubat Lot", "Mart Lot", "Nisan Lot", 
@@ -33,7 +34,6 @@ def build_portfolio_matrix(all_parsed_data):
                 "Ay No": ay_numarasi,
                 "Lot": h["lot"],
                 "Ort. Maliyet (TL)": h["maliyet"],
-                "Rapor Tarihindeki Hisse Fiyatı": h["hisse_fiyati"],
                 "Grup Ağ. (%)": h["grup_agirligi"]
             })
             
@@ -42,7 +42,11 @@ def build_portfolio_matrix(all_parsed_data):
         
     df = pd.DataFrame(records)
     
-    # 1. Lot Pivot
+    # 1. BIST Canlı Son Kapanış Fiyatlarını Çek
+    unique_hisseler = df["Hisse Kodu"].unique().tolist()
+    live_prices = get_bist_live_prices(unique_hisseler)
+    
+    # 2. Lot Pivot
     pivot_lot = df.pivot_table(
         index=["Hisse Kodu", "Fon Kodu", "Portföy Şirketi"],
         columns="Dönem",
@@ -53,29 +57,29 @@ def build_portfolio_matrix(all_parsed_data):
     existing_months = [m for m in MONTH_ORDER if m in pivot_lot.columns]
     pivot_lot = pivot_lot[existing_months]
     
-    # 2. En Son Ayın Metriklerini Toplayarak Al
+    # 3. Son Ayın Metrikleri
     df_sorted = df.sort_values(by="Ay No")
-    
-    # En son ay hangisiyse sadece o ayın verilerini çek
     max_ay = df_sorted["Ay No"].max()
     latest_month_df = df_sorted[df_sorted["Ay No"] == max_ay]
     
     latest_metrics = latest_month_df.groupby(["Hisse Kodu", "Fon Kodu", "Portföy Şirketi"]).agg({
-        "Grup Ağ. (%)": "sum",                   # Net Grup Ağırlığı (11.35 + -0.08 = 11.27)
-        "Ort. Maliyet (TL)": "last",
-        "Rapor Tarihindeki Hisse Fiyatı": "last"
+        "Grup Ağ. (%)": "sum",
+        "Ort. Maliyet (TL)": "last"
     }).reset_index()
     
-    # Birleştir
+    # Tabloları Birleştir
     merged_df = pd.merge(pivot_lot.reset_index(), latest_metrics, on=["Hisse Kodu", "Fon Kodu", "Portföy Şirketi"], how="left")
     
-    # 3. Formatlama
+    # 4. Canlı Fiyatı Ekleme
+    merged_df["Güncel Hisse Fiyatı (TL)"] = merged_df["Hisse Kodu"].map(live_prices)
+    
+    # Formatlama
     for m in existing_months:
         merged_df[m] = merged_df[m].apply(lambda x: f"{x:,.0f}".replace(",", ".") if x > 0 else "-")
         
     merged_df["Grup Ağ. (%)"] = merged_df["Grup Ağ. (%)"].apply(lambda x: f"%{x:.2f}" if pd.notnull(x) and x != 0 else "-")
     merged_df["Ort. Maliyet (TL)"] = merged_df["Ort. Maliyet (TL)"].apply(lambda x: f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if pd.notnull(x) and x > 0 else "-")
-    merged_df["Rapor Tarihindeki Hisse Fiyatı"] = merged_df["Rapor Tarihindeki Hisse Fiyatı"].apply(lambda x: f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if pd.notnull(x) and x > 0 else "-")
+    merged_df["Güncel Hisse Fiyatı (TL)"] = merged_df["Güncel Hisse Fiyatı (TL)"].apply(lambda x: f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if pd.notnull(x) and pd.notna(x) else "-")
     
-    final_cols = ["Hisse Kodu", "Fon Kodu", "Portföy Şirketi"] + existing_months + ["Grup Ağ. (%)", "Ort. Maliyet (TL)", "Rapor Tarihindeki Hisse Fiyatı"]
+    final_cols = ["Hisse Kodu", "Fon Kodu", "Portföy Şirketi"] + existing_months + ["Grup Ağ. (%)", "Ort. Maliyet (TL)", "Güncel Hisse Fiyatı (TL)"]
     return merged_df[final_cols]
