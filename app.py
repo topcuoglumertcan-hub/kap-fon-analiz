@@ -23,21 +23,26 @@ if uploaded_files:
         
         progress_bar = st.progress(0)
         for idx, pdf_file in enumerate(uploaded_files):
-            # PDF Ayrıştırma
             parsed = parse_pdf(pdf_file)
             all_results.append(parsed)
             progress_bar.progress((idx + 1) / len(uploaded_files))
             
-        st.subheader("📋 Birleştirilmiş Portföy & Hisse Dağılım Tablosu")
-        
-        # Verileri Matris Yapısına Dönüştür
         matrix_df = build_portfolio_matrix(all_results)
         
         if not matrix_df.empty:
-            # Tabloyu Ekrana Bas
-            st.dataframe(matrix_df, use_container_width=True)
+            st.subheader("📋 Birleştirilmiş Portföy & Hisse Dağılım Tablosu")
             
-            # Excel İndirme Butonu
+            # Görsel 5'teki gibi biçimlendirilmiş gösterim
+            st.dataframe(
+                matrix_df.style.format({
+                    "Ort. Maliyet (TL)": "{:.2f}",
+                    "Rapor Tarihindeki Hisse Fiyatı": "{:.2f}",
+                    "Grup Ağ. (%)": "%{:.2f}"
+                }),
+                use_container_width=True
+            )
+            
+            # Excel İndirme
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 matrix_df.to_excel(writer, index=False, sheet_name='Fon_Analiz')
@@ -49,4 +54,4 @@ if uploaded_files:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("PDF'lerden hisse tablosu verisi çıkarılamadı. Formatları kontrol edin.")
+            st.error("PDF içeriği okundu ancak Hisse Tablosu verisi ayrıştırılamadı. Lütfen PDF dosyalarının şifresiz ve standart KAP formatında olduğundan emin olun.")
