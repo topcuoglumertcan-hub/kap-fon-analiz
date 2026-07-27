@@ -10,6 +10,8 @@ def parse_pdf(pdf_file):
         "hisseler": []
     }
     
+    raw_hisseler = []
+    
     with pdfplumber.open(pdf_file) as pdf:
         full_text = ""
         for page in pdf.pages:
@@ -49,7 +51,7 @@ def parse_pdf(pdf_file):
                 
             isin_match = re.search(r"(TR[A-Z0-9]{10})", line_str)
             
-            if isin_match or (in_hisse_section and re.search(r"\d{1,3}(?:\.\d{3})+,\d{2}", line_str)):
+            if isin_match or (in_hisse_section and re.search(r"[-+]?\d{1,3}(?:\.\d{3})+,\d{2}", line_str)):
                 hisse_kodu = ""
                 search_scope = [line_str]
                 if i > 0: search_scope.append(lines[i-1].strip())
@@ -79,17 +81,13 @@ def parse_pdf(pdf_file):
 
                 parsed_numbers = [parse_tr_float(n) for n in numbers]
                 
-                # KAP Tablo Dizilimi:
-                # Lot | Maliyet | Hisse Fiyatı | ... | GRUP (%) | TOPLAM (FPD) | TOPLAM (FTD)
                 if len(parsed_numbers) >= 2:
                     lot = parsed_numbers[0]
                     maliyet = parsed_numbers[1]
                     hisse_fiyati = parsed_numbers[2] if len(parsed_numbers) > 2 else maliyet
-                    
-                    # Görsel 2'deki GRUP (%) Sütununu Yakalama (Genelde sondan 3. sayısal değerdir)
                     grup_agirligi = parsed_numbers[-3] if len(parsed_numbers) >= 5 else (parsed_numbers[-1] if len(parsed_numbers) >= 3 else 0.0)
 
-                    extracted_data["hisseler"].append({
+                    raw_hisseler.append({
                         "hisse": hisse_kodu,
                         "lot": lot,
                         "maliyet": maliyet,
@@ -97,4 +95,27 @@ def parse_pdf(pdf_file):
                         "grup_agirligi": grup_agirligi
                     })
 
+    # PDF İÇİNDEKİ MÜKERRER HİSSELERİ (KTLEV +, KTLEV -) NETLEŞTİRME
+    hisse_dict = {}
+    for item in raw_hisseler:
+        hk = item["hisse"]
+        if hk not in hisse_dict:
+            hisse_dict[hk] = {
+                "hisse": hk,
+                "lot": 0.0,
+                "grup_agirligi": 0.0,
+                "maliyet": item["maliyet"],       # Ana pozisyon maliyeti
+                "hisse_fiyati": item["hisse_fiyati"] # Ana pozisyon fiyatı
+            }
+        
+        # Lot ve Grup Ağırlıklarını Netleştir (Topla)
+        hisse_dict[hk]["lot"] += item["lot"]
+        hisse_dict[hk]["grup_agirligi"] += item["grup_agirligi"]
+        
+        # Eğer büyük/pozitif lotlu satır gelirse Maliyet ve Fiyatı o ana satırdan al
+        if item["lot"] > 0:
+            hisse_dict[hk]["maliyet"] = item["maliyet"]
+            hisse_dict[hk]["hisse_fiyati"] = item["hisse_fiyati"]
+
+    extracted_data["hisseler"] = list(hisse_dict.values())
     return extracted_data
