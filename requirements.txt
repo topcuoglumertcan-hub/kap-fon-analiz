@@ -6,3 +6,5 @@ pdfplumber
 openpyxl
 playwright
 lxml
+Plaintext
+yfinance
