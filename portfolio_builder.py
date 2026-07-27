@@ -7,7 +7,7 @@ MONTH_ORDER = [
     "Eylül Lot", "Ekim Lot", "Kasım Lot", "Aralık Lot"
 ]
 
-# Ay İsimlerinin İndeks Karşılığı (Son Dönemi Bulmak İçin)
+# Ay İsimlerinin İndeks Karşılığı (Son Yüklenen Ayı Bulmak İçin)
 MONTH_MAP = {
     "Ocak": 1, "Şubat": 2, "Mart": 3, "Nisan": 4, 
     "Mayıs": 5, "Haziran": 6, "Temmuz": 7, "Ağustos": 8, 
@@ -36,7 +36,7 @@ def build_portfolio_matrix(all_parsed_data):
                 "Lot": h["lot"],
                 "Ort. Maliyet (TL)": h["maliyet"],
                 "Rapor Tarihindeki Hisse Fiyatı": h["hisse_fiyati"],
-                "Grup Ağ. (%)": h["grup_agirligi"] # PDF'teki GRUP (%) değeri
+                "Grup Ağ. (%)": h["grup_agirligi"]
             })
             
     if not records:
@@ -44,7 +44,7 @@ def build_portfolio_matrix(all_parsed_data):
         
     df = pd.DataFrame(records)
     
-    # 1. Lotları Ay Bazlı Pivot Yap (Hisse + Fon + Portföy Kırılımı)
+    # 1. Lotları Ay Bazlı Pivot Yap (Hisse Kodu, Fon Kodu, Portföy Şirketi Bazında)
     pivot_lot = df.pivot_table(
         index=["Hisse Kodu", "Fon Kodu", "Portföy Şirketi"],
         columns="Dönem",
@@ -52,16 +52,14 @@ def build_portfolio_matrix(all_parsed_data):
         aggfunc="sum"
     ).fillna(0)
     
-    # Sütunları Kronolojik Diz (Ocak'tan Aralık'a)
+    # Sütunları Kronolojik Diz (Ocak Lot, Şubat Lot...)
     existing_months = [m for m in MONTH_ORDER if m in pivot_lot.columns]
     pivot_lot = pivot_lot[existing_months]
     
-    # 2. En Son Döneme Ait Grup Ağırlığı ve Güncel Fiyat/Maliyetleri Alma
-    # Yüklenen en son aya göre sıralayıp en güncel kaydı alıyoruz
+    # 2. Yüklenen En Son Ayın GRUP % Değerini ve Güncel Fiyatları Al
     df_sorted = df.sort_values(by="Ay No")
-    
     latest_metrics = df_sorted.groupby(["Hisse Kodu", "Fon Kodu", "Portföy Şirketi"]).agg({
-        "Grup Ağ. (%)": "last",                  # Yüklenen en son ayın GRUP % değeri
+        "Grup Ağ. (%)": "last",                  # Yüklenen en son ayın GRUP % değeri (Haziran ise Haziran)
         "Ort. Maliyet (TL)": "last",
         "Rapor Tarihindeki Hisse Fiyatı": "last"
     }).reset_index()
@@ -69,7 +67,7 @@ def build_portfolio_matrix(all_parsed_data):
     # Tabloları Birleştir
     merged_df = pd.merge(pivot_lot.reset_index(), latest_metrics, on=["Hisse Kodu", "Fon Kodu", "Portföy Şirketi"], how="left")
     
-    # 3. Görsel Biçimlendirme (0 Değerleri Yerine '-' Koyma)
+    # 3. Sayısal Değerleri Biçimlendir (0 Olan Lotlara '-' Koy)
     for m in existing_months:
         merged_df[m] = merged_df[m].apply(lambda x: f"{x:,.0f}".replace(",", ".") if x > 0 else "-")
         
@@ -77,7 +75,7 @@ def build_portfolio_matrix(all_parsed_data):
     merged_df["Ort. Maliyet (TL)"] = merged_df["Ort. Maliyet (TL)"].apply(lambda x: f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if pd.notnull(x) and x > 0 else "-")
     merged_df["Rapor Tarihindeki Hisse Fiyatı"] = merged_df["Rapor Tarihindeki Hisse Fiyatı"].apply(lambda x: f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if pd.notnull(x) and x > 0 else "-")
     
-    # Sütun Sıralamasını İstenen Yapıya Getirme
+    # Sütun Sıralaması
     final_cols = ["Hisse Kodu", "Fon Kodu", "Portföy Şirketi"] + existing_months + ["Grup Ağ. (%)", "Ort. Maliyet (TL)", "Rapor Tarihindeki Hisse Fiyatı"]
     final_df = merged_df[final_cols]
     
