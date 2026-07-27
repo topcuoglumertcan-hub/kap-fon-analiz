@@ -1,5 +1,8 @@
 streamlit
 pandas
-openpyxl
 requests
+beautifulsoup4
 pdfplumber
+openpyxl
+playwright
+lxml
