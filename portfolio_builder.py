@@ -4,18 +4,18 @@ def build_portfolio_matrix(all_parsed_data):
     records = []
     
     for item in all_parsed_data:
-        fon_kodu = item.get("fon_kodu", "PHE")
-        fon_adi = item.get("fon_adi", "Fon")
-        donem = item.get("donem", "Dönem") # Örn: "Haziran 2026"
+        fon_kodu = item.get("fon_kodu", "FON")
+        donem = item.get("donem", "Bilinmeyen Dönem")
         
-        # Dönem bilgisinden sadece Ay ismini alma (ör. "Haziran 2026" -> "Haziran")
-        ay_adi = donem.split()[0] if donem else "Bilinmeyen Ay"
+        # Dönemden Ay ismini çek (ör: "Haziran 2026" -> "Haziran")
+        ay_adi = donem.split()[0] if donem else "Birim"
+        col_name = f"{ay_adi} Lot"
         
         for h in item.get("hisseler", []):
             records.append({
                 "Hisse Kodu": h["hisse"],
-                "Fon Adı": fon_kodu, # Görseldeki Fon Kısa Adı
-                "Dönem": f"{ay_adi} Lot",
+                "Fon Adı": fon_kodu,
+                "Dönem": col_name,
                 "Lot": h["lot"],
                 "Ort. Maliyet (TL)": h["maliyet"],
                 "Rapor Tarihindeki Hisse Fiyatı": h["hisse_fiyati"],
@@ -27,7 +27,7 @@ def build_portfolio_matrix(all_parsed_data):
         
     df = pd.DataFrame(records)
     
-    # Aynı ay içerisinde birden fazla pozisyon varsa (alış/satış) hisse lotlarını topla
+    # Lotları Ay Bazlı Pivot Yap
     pivot_lot = df.pivot_table(
         index=["Hisse Kodu", "Fon Adı"],
         columns="Dönem",
@@ -35,17 +35,17 @@ def build_portfolio_matrix(all_parsed_data):
         aggfunc="sum"
     ).fillna(0)
     
-    # Son ayın Maliyet, Hisse Fiyatı ve Grup Ağırlığı değerlerini alalım
+    # Son güncel Maliyet ve Hisse Fiyatlarını Al
     latest_metrics = df.groupby(["Hisse Kodu", "Fon Adı"]).agg({
         "Grup Ağ. (%)": "last",
         "Ort. Maliyet (TL)": "mean",
         "Rapor Tarihindeki Hisse Fiyatı": "last"
     }).reset_index()
     
-    # Pivot Tablo ile Metrikleri Birleştir
+    # Tabloları Birleştir
     final_df = pd.merge(pivot_lot.reset_index(), latest_metrics, on=["Hisse Kodu", "Fon Adı"], how="left")
     
-    # Sütunları düzenleme ve Toplam satırı hazırlama
-    cols = list(final_df.columns)
+    # Toplam Satırı (Görsel 5 formatına uygun)
+    hisse_totals = final_df.groupby("Hisse Kodu").size()
     
     return final_df
